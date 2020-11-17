@@ -267,8 +267,8 @@ def train():
                                                               global_step_transform=global_step_from_engine(trainer)),
                          event_name=Events.EPOCH_COMPLETED)
 
-        checkpoint_handler = ModelCheckpoint(log_dir, 'checkpoint', save_interval=1, n_saved=3)
-        trainer.add_event_handler(Events.EPOCH_COMPLETED, checkpoint_handler, {
+        checkpoint_handler = ModelCheckpoint(log_dir, 'checkpoint', n_saved=1)
+        trainer.add_event_handler(Events.ITERATION_COMPLETED(every=5000), checkpoint_handler, {
             'mymodel': getattr(model, 'module', model)})  # "getattr" takes care of distributed encapsulation
 
         torch.save(args, log_dir + '/model_training_args.bin')
@@ -278,10 +278,12 @@ def train():
     # Run the training
     trainer.run(train_loader, max_epochs=args.n_epochs)
 
-    # On the main process: close tensorboard logger and rename the last checkpoint (for easy re-loading with OpenAIGPTModel.from_pretrained method)
+    # On the main process: close tensorboard logger and rename the last checkpoint (for easy re-loading with
+    # OpenAIGPTModel.from_pretrained method)
     if args.local_rank in [-1, 0] and args.n_epochs > 0:
-        os.rename(os.path.join(log_dir, checkpoint_handler._saved[-1][1]), os.path.join(log_dir,
-                                                                                        WEIGHTS_NAME))  # TODO: PR in ignite to have better access to saved file paths (cleaner)
+        os.rename(
+            os.path.join(log_dir, checkpoint_handler._saved[-1][1]),
+            os.path.join(log_dir, WEIGHTS_NAME))  # TODO: PR in ignite to have better access to saved file paths (cleaner)
         tb_logger.close()
 
 
