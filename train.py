@@ -16,8 +16,8 @@ from ignite.handlers import ModelCheckpoint, global_step_from_engine
 from ignite.metrics import Accuracy, Loss, MetricsLambda, RunningAverage
 from ignite.contrib.handlers import ProgressBar, PiecewiseLinear
 from ignite.contrib.handlers.tensorboard_logger import TensorboardLogger, OutputHandler, OptimizerParamsHandler
-from transformers import (AdamW, OpenAIGPTDoubleHeadsModel, OpenAIGPTTokenizer,
-                          GPT2DoubleHeadsModel, GPT2Tokenizer, WEIGHTS_NAME, CONFIG_NAME)
+from transformers import (AdamW, GPT2Config, GPT2DoubleHeadsModel,
+                          GPT2Tokenizer, WEIGHTS_NAME, CONFIG_NAME)
 
 from utils import get_dataset
 
@@ -126,6 +126,7 @@ def train():
     parser.add_argument("--model_checkpoint", type=str, default="openai-gpt",
                         help="Path, url or short name of the model")
     parser.add_argument("--train_dir", type=str, default="train")
+    parser.add_argument("--from_config")
     parser.add_argument("--num_candidates", type=int, default=2, help="Number of candidates for training")
     parser.add_argument("--max_history", type=int, default=2, help="Number of previous exchanges to keep in history")
     parser.add_argument("--train_batch_size", type=int, default=4, help="Batch size for training")
@@ -163,11 +164,16 @@ def train():
         torch.distributed.init_process_group(backend='nccl', init_method='env://')
 
     logger.info("Prepare tokenizer, pretrained model and optimizer.")
-    tokenizer_class = GPT2Tokenizer if "gpt2" in args.model_checkpoint else OpenAIGPTTokenizer  # cant use Autotokenizer because checkpoint could be a Path
-    tokenizer = tokenizer_class.from_pretrained(args.model_checkpoint)
+    tokenizer = GPT2Tokenizer.from_pretrained(args.model_checkpoint)
 
-    model_class = GPT2DoubleHeadsModel if "gpt2" in args.model_checkpoint else OpenAIGPTDoubleHeadsModel
-    model = model_class.from_pretrained(args.model_checkpoint)
+    if args.from_config == 'medium':
+        gpt2_medium_config = GPT2Config(n_ctx=1024, n_embd=1024, n_layer=24, n_head=16)
+
+    elif args.from_config == 'large':
+        gpt2_large_config = GPT2Config(n_ctx=1024, n_embd=1280, n_layer=36, n_head=20)
+    else:
+        model = GPT2DoubleHeadsModel.from_pretrained(args.model_checkpoint)
+
     model.to(args.device)
     # Add special tokens if they are not already added
     add_special_tokens_(model, tokenizer)

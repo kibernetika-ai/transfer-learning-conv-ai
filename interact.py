@@ -102,12 +102,12 @@ def run():
                         help="Device (cuda or cpu)")
 
     parser.add_argument("--no_sample", action='store_true', help="Set to use greedy decoding instead of sampling")
-    parser.add_argument("--max_length", type=int, default=20, help="Maximum length of the output utterances")
+    parser.add_argument("--max_length", type=int, default=40, help="Maximum length of the output utterances")
     parser.add_argument("--min_length", type=int, default=1, help="Minimum length of the output utterances")
     parser.add_argument("--seed", type=int, default=0, help="Seed")
     parser.add_argument("--temperature", type=float, default=0.7, help="Sampling softmax temperature")
     parser.add_argument("--top_k", type=int, default=0, help="Filter top-k tokens before sampling (<=0: no filtering)")
-    parser.add_argument("--top_p", type=float, default=0.9,
+    parser.add_argument("--top_p", type=float, default=0.85,
                         help="Nucleus filtering (top-p) before sampling (<=0.0: no filtering)")
     args = parser.parse_args()
 
@@ -127,43 +127,38 @@ def run():
         torch.cuda.manual_seed(args.seed)
 
     logger.info("Get pretrained model and tokenizer")
-    tokenizer_class, model_class = (GPT2Tokenizer, GPT2LMHeadModel) if args.model == 'gpt2' else (
-    OpenAIGPTTokenizer, OpenAIGPTLMHeadModel)
+    tokenizer_class, model_class = GPT2Tokenizer, GPT2LMHeadModel
     tokenizer = tokenizer_class.from_pretrained(args.model_checkpoint)
-    model = model_class.from_pretrained(args.model_checkpoint)
-    model.to(args.device)
-    add_special_tokens_(model, tokenizer)
+    # tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
 
     logger.info("Sample a personality")
     dataset = get_dataset(tokenizer, args.dataset_path, args.dataset_cache)
     personalities = [dialog["personality"] for dataset in dataset.values() for dialog in dataset]
     personality = random.choice(personalities)
-    personality_flat = list(chain(*personality))
-    personality_list = []
-    sublist = []
-    for t in personality_flat:
-        if t is None:
-            personality_list.append(sublist)
-            sublist = []
-        else:
-            sublist.append(t)
-    __import__('ipdb').set_trace()
-    personality_str = ' '.join(tokenizer.decode(p) for p in personality_list)
+    personality_str = tokenizer.decode(chain(*personality))
+
+    model = model_class.from_pretrained(args.model_checkpoint)
+    model.to(args.device)
+    add_special_tokens_(model, tokenizer)
+
+    # ss = ('i am santa claus. i love to give presents to people. '
+    #       'i have magic flying deers. i love kids. i have elf factory.')
     logger.info("Selected personality: %s", personality_str)
+    # personality = [tokenizer.encode(ss)]
 
     history = []
     while True:
-        raw_text = input(">>> ")
+        raw_text = input("User: ")
         while not raw_text:
             print('Prompt should not be empty!')
-            raw_text = input(">>> ")
+            raw_text = input("User: ")
         history.append(tokenizer.encode(raw_text))
         with torch.no_grad():
             out_ids = sample_sequence(personality, history, tokenizer, model, args)
         history.append(out_ids)
         history = history[-(2 * args.max_history + 1):]
         out_text = tokenizer.decode(out_ids, skip_special_tokens=True)
-        print(out_text)
+        print(f'Bot: {out_text}')
 
 
 if __name__ == "__main__":
