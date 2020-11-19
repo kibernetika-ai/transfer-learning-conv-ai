@@ -231,16 +231,16 @@ def train():
     evaluator = Engine(inference)
 
     # Attach evaluation to trainer: we evaluate when we start the training and at the end of each epoch
-    trainer.add_event_handler(Events.EPOCH_COMPLETED, lambda _: evaluator.run(val_loader))
-    if args.n_epochs < 1:
-        trainer.add_event_handler(Events.COMPLETED, lambda _: evaluator.run(val_loader))
-    if args.eval_before_start:
-        trainer.add_event_handler(Events.STARTED, lambda _: evaluator.run(val_loader))
+    # trainer.add_event_handler(Events.EPOCH_COMPLETED, lambda _: evaluator.run(val_loader))
+    # if args.n_epochs < 1:
+    #     trainer.add_event_handler(Events.COMPLETED, lambda _: evaluator.run(val_loader))
+    # if args.eval_before_start:
+    #     trainer.add_event_handler(Events.STARTED, lambda _: evaluator.run(val_loader))
 
     # Make sure distributed data samplers split the dataset nicely between the distributed processes
     if args.distributed:
         trainer.add_event_handler(Events.EPOCH_STARTED, lambda engine: train_sampler.set_epoch(engine.state.epoch))
-        evaluator.add_event_handler(Events.EPOCH_STARTED, lambda engine: valid_sampler.set_epoch(engine.state.epoch))
+        # evaluator.add_event_handler(Events.EPOCH_STARTED, lambda engine: valid_sampler.set_epoch(engine.state.epoch))
 
     # Linearly decrease the learning rate from lr to zero
     scheduler = PiecewiseLinear(optimizer, "lr", [(0, args.lr), (args.n_epochs * len(train_loader), 0.0)])
@@ -253,15 +253,15 @@ def train():
     metrics.update({"average_nll": MetricsLambda(average_distributed_scalar, metrics["nll"], args),
                     "average_accuracy": MetricsLambda(average_distributed_scalar, metrics["accuracy"], args)})
     metrics["average_ppl"] = MetricsLambda(math.exp, metrics["average_nll"])
-    for name, metric in metrics.items():
-        metric.attach(evaluator, name)
+    # for name, metric in metrics.items():
+    #     metric.attach(evaluator, name)
 
     # On the main process: add progress bar, tensorboard, checkpoints and save model, configuration and tokenizer before we start to train
     if args.local_rank in [-1, 0]:
         pbar = ProgressBar(persist=True)
         pbar.attach(trainer, metric_names=["loss"])
-        evaluator.add_event_handler(Events.COMPLETED,
-                                    lambda _: pbar.log_message("Validation: %s" % pformat(evaluator.state.metrics)))
+        # evaluator.add_event_handler(Events.COMPLETED,
+        #                             lambda _: pbar.log_message("Validation: %s" % pformat(evaluator.state.metrics)))
 
         log_dir = args.train_dir
         tb_logger = TensorboardLogger(log_dir)
@@ -269,9 +269,9 @@ def train():
         tb_logger.attach(trainer, log_handler=OutputHandler(tag="training", metric_names=["loss"]),
                          event_name=Events.ITERATION_COMPLETED)
         tb_logger.attach(trainer, log_handler=OptimizerParamsHandler(optimizer), event_name=Events.ITERATION_STARTED)
-        tb_logger.attach(evaluator, log_handler=OutputHandler(tag="validation", metric_names=list(metrics.keys()),
-                                                              global_step_transform=global_step_from_engine(trainer)),
-                         event_name=Events.EPOCH_COMPLETED)
+        # tb_logger.attach(evaluator, log_handler=OutputHandler(tag="validation", metric_names=list(metrics.keys()),
+        #                                                       global_step_transform=global_step_from_engine(trainer)),
+        #                  event_name=Events.EPOCH_COMPLETED)
 
         checkpoint_handler = ModelCheckpoint(log_dir, 'checkpoint', n_saved=1)
         trainer.add_event_handler(Events.ITERATION_COMPLETED(every=5000), checkpoint_handler, {
