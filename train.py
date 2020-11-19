@@ -10,7 +10,7 @@ from itertools import chain
 
 import torch
 from torch.nn.parallel import DistributedDataParallel
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import Dataset, DataLoader, TensorDataset
 from ignite.engine import Engine, Events
 from ignite.handlers import ModelCheckpoint, global_step_from_engine
 from ignite.metrics import Accuracy, Loss, MetricsLambda, RunningAverage
@@ -28,6 +28,23 @@ MODEL_INPUTS = ["input_ids", "mc_token_ids", "lm_labels", "mc_labels", "token_ty
 PADDED_INPUTS = ["input_ids", "lm_labels", "token_type_ids"]
 
 logger = logging.getLogger(__file__)
+
+
+class DatasetRepeater(Dataset):
+    """
+    Pass several times over the same dataset for better i/o performance
+    """
+
+    def __init__(self, dataset, num_repeats=100):
+        self.dataset = dataset
+        self.num_repeats = num_repeats
+
+    def __len__(self):
+        return self.num_repeats * self.dataset.__len__()
+
+    def __getitem__(self, idx):
+        return self.dataset[idx % self.dataset.__len__()]
+
 
 
 def average_distributed_scalar(scalar, args):
@@ -107,6 +124,8 @@ def get_data_loaders(args, tokenizer):
 
     logger.info("Build train and validation dataloaders")
     train_dataset, valid_dataset = TensorDataset(*tensor_datasets["train"]), TensorDataset(*tensor_datasets["valid"])
+    if args.repeats > 0:
+        train_dataset = DatasetRepeater(train_dataset, num_repeats=args.repeat)
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset) if args.distributed else None
     valid_sampler = torch.utils.data.distributed.DistributedSampler(valid_dataset) if args.distributed else None
     train_loader = DataLoader(train_dataset, sampler=train_sampler, batch_size=args.train_batch_size,
@@ -127,6 +146,7 @@ def train():
                         help="Path, url or short name of the model")
     parser.add_argument("--train_dir", type=str, default="train")
     parser.add_argument("--from_config")
+    parser.add_argument("--repeats", type=int, default=0)
     parser.add_argument("--num_candidates", type=int, default=2, help="Number of candidates for training")
     parser.add_argument("--max_history", type=int, default=2, help="Number of previous exchanges to keep in history")
     parser.add_argument("--train_batch_size", type=int, default=4, help="Batch size for training")
