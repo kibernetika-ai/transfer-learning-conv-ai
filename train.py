@@ -276,6 +276,8 @@ def train():
         checkpoint_handler = ModelCheckpoint(log_dir, 'checkpoint', n_saved=1)
         trainer.add_event_handler(Events.ITERATION_COMPLETED(every=5000), checkpoint_handler, {
             'mymodel': getattr(model, 'module', model)})  # "getattr" takes care of distributed encapsulation
+        trainer.add_event_handler(Events.EPOCH_COMPLETED, checkpoint_handler, {
+            'mymodel': getattr(model, 'module', model)})  # "getattr" takes care of distributed encapsulation
 
         torch.save(args, log_dir + '/model_training_args.bin')
         getattr(model, 'module', model).config.to_json_file(os.path.join(log_dir, CONFIG_NAME))
