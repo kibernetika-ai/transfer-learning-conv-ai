@@ -24,6 +24,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--csv-src', required=True)
     parser.add_argument('--output', required=True)
+    parser.add_argument('--full', action='store_true')
 
     return parser.parse_args()
 
@@ -46,7 +47,7 @@ def main():
         row = []
         prev = i - 1 - n  # we additionally substract 1, so row will contain current responce and 7 previous responces
         # Skip non-Rick replies
-        if 'Rick' not in all_rick['name'][i]:
+        if not args.full and 'Rick' not in all_rick['name'][i]:
             continue
 
         for j in range(i, prev, -1):
