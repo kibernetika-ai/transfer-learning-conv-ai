@@ -105,9 +105,9 @@ def run():
     parser.add_argument("--max_length", type=int, default=40, help="Maximum length of the output utterances")
     parser.add_argument("--min_length", type=int, default=1, help="Minimum length of the output utterances")
     parser.add_argument("--seed", type=int, default=0, help="Seed")
-    parser.add_argument("--temperature", type=float, default=0.7, help="Sampling softmax temperature")
-    parser.add_argument("--top_k", type=int, default=0, help="Filter top-k tokens before sampling (<=0: no filtering)")
-    parser.add_argument("--top_p", type=float, default=0.85,
+    parser.add_argument("--temperature", type=float, default=0.8, help="Sampling softmax temperature")
+    parser.add_argument("--top_k", type=int, default=20, help="Filter top-k tokens before sampling (<=0: no filtering)")
+    parser.add_argument("--top_p", type=float, default=0.9,
                         help="Nucleus filtering (top-p) before sampling (<=0.0: no filtering)")
     args = parser.parse_args()
 
@@ -127,8 +127,7 @@ def run():
         torch.cuda.manual_seed(args.seed)
 
     logger.info("Get pretrained model and tokenizer")
-    tokenizer_class, model_class = GPT2Tokenizer, GPT2LMHeadModel
-    tokenizer = tokenizer_class.from_pretrained(args.model_checkpoint)
+    tokenizer = GPT2Tokenizer.from_pretrained(args.model_checkpoint)
     # tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
 
     logger.info("Sample a personality")
@@ -137,7 +136,7 @@ def run():
     personality = random.choice(personalities)
     personality_str = tokenizer.decode(chain(*personality))
 
-    model = model_class.from_pretrained(args.model_checkpoint)
+    model = GPT2LMHeadModel.from_pretrained(args.model_checkpoint)
     model.to(args.device)
     add_special_tokens_(model, tokenizer)
 
