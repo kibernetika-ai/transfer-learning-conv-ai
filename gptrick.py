@@ -1,3 +1,4 @@
+import argparse
 import glob
 import logging
 import os
@@ -35,42 +36,44 @@ MODEL_CONFIG_CLASSES = list(MODEL_WITH_LM_HEAD_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
 
-# Args to allow for easy conversion of python script to notebook
-class Args:
-    def __init__(self):
-        self.output_dir = 'output-small'
-        self.model_type = 'gpt2'
-        self.model_name_or_path = 'microsoft/pytorch_model.bin'
-        self.config_name = 'microsoft/config.json'
-        self.tokenizer_name = 'microsoft/'
-        self.cache_dir = 'cached'
-        self.dataset = '/home/kolyan/Downloads/datasets/RickAndMortyScripts.csv'
-        self.block_size = 512
-        self.do_train = True
-        self.do_eval = False
-        self.evaluate_during_training = False
-        self.per_gpu_train_batch_size = 1
-        self.per_gpu_eval_batch_size = 1
-        self.gradient_accumulation_steps = 1
-        self.learning_rate = 5e-5
-        self.weight_decay = 0.0
-        self.adam_epsilon = 1e-8
-        self.max_grad_norm = 1.0
-        self.num_train_epochs = 2
-        self.max_steps = -1
-        self.warmup_steps = 0
-        self.logging_steps = 1000
-        self.save_steps = 3500
-        self.save_total_limit = None
-        self.eval_all_checkpoints = False
-        self.no_cuda = False
-        self.overwrite_output_dir = True
-        self.overwrite_cache = True
-        self.should_continue = False
-        self.seed = 42
-        self.local_rank = -1
-        self.fp16 = False
-        self.fp16_opt_level = 'O1'
+def parse_args():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--output_dir', default='output-small')
+    parser.add_argument('--model_type', default='gpt2')
+    parser.add_argument('--model_name_or_path', default='microsoft/pytorch_model.bin')
+    parser.add_argument('--config_name', default='microsoft/config.json')
+    parser.add_argument('--tokenizer_name', default='microsoft/')
+    parser.add_argument('--cache_dir', default='cached')
+    parser.add_argument('--dataset', required=True)
+    parser.add_argument('--block_size', default=512)
+    parser.add_argument('--do_train', default=True)
+    parser.add_argument('--do_eval', default=False)
+    parser.add_argument('--evaluate_during_training', default=False)
+    parser.add_argument('--per_gpu_train_batch_size', default=1)
+    parser.add_argument('--per_gpu_eval_batch_size', default=1)
+    parser.add_argument('--gradient_accumulation_steps', default=1)
+    parser.add_argument('--learning_rate', default=5e-5)
+    parser.add_argument('--weight_decay', default=0.0)
+    parser.add_argument('--adam_epsilon', default=1e-8)
+    parser.add_argument('--max_grad_norm', default=1.0)
+    parser.add_argument('--num_train_epochs', default=2)
+    parser.add_argument('--max_steps', default=-1)
+    parser.add_argument('--warmup_steps', default=0)
+    parser.add_argument('--logging_steps', default=1000)
+    parser.add_argument('--save_steps', default=3500)
+    parser.add_argument('--save_total_limit', default=None)
+    parser.add_argument('--eval_all_checkpoints', default=False)
+    parser.add_argument('--no_cuda', default=False)
+    parser.add_argument('--overwrite_output_dir', default=True)
+    parser.add_argument('--overwrite_cache', default=True)
+    parser.add_argument('--should_continue', default=False)
+    parser.add_argument('--seed', default=42)
+    parser.add_argument('--local_rank', default=-1)
+    parser.add_argument('--fp16', default=False)
+    parser.add_argument('--fp16_opt_level', default='O1')
+
+    return parser.parse_args()
 
 
 def construct_conv(row, tokenizer, eos=True):
@@ -411,7 +414,7 @@ def evaluate(args, model: PreTrainedModel, tokenizer: PreTrainedTokenizer, eval_
 
 
 def main():
-    args = Args()
+    args = parse_args()
 
     all_rick = pd.read_csv(args.dataset)
     contexted = []
