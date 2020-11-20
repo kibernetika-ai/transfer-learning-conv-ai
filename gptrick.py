@@ -45,6 +45,7 @@ def parse_args():
     parser.add_argument('--config_name', default='microsoft/config.json')
     parser.add_argument('--tokenizer_name', default='microsoft/')
     parser.add_argument('--cache_dir', default='cached')
+    parser.add_argument('--state_dict')
     parser.add_argument('--dataset', required=True)
     parser.add_argument('--block_size', default=512)
     parser.add_argument('--mode', default='train')
@@ -433,7 +434,7 @@ def main():
     df = pd.DataFrame.from_records(contexted, columns=columns)
     df_trn, df_val = train_test_split(df, test_size=0.1)
 
-    if args.should_continue:
+    if args.should_continue and args.mode == 'train':
         sorted_checkpoints = _sorted_checkpoints(args)
         if len(sorted_checkpoints) == 0:
             logger.warning("Used --should_continue but no checkpoint was found in --output_dir.")
@@ -455,7 +456,7 @@ def main():
         )
 
     # Setup CUDA, GPU & distributed training
-    device = torch.device("cuda")
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device('cpu')
     args.n_gpu = torch.cuda.device_count()
     args.device = device
 
@@ -465,22 +466,31 @@ def main():
         datefmt="%m/%d/%Y %H:%M:%S",
         level=logging.INFO if args.local_rank in [-1, 0] else logging.WARN,
     )
-    logger.info(
-        "Process rank: %s, device: %s, n_gpu: %s, distributed training: %s, 16-bits training: %s",
-        args.local_rank, device, args.n_gpu, bool(args.local_rank != -1), args.fp16,
-    )
+    # logger.info(
+    #     "Process rank: %s, device: %s, n_gpu: %s, distributed training: %s, 16-bits training: %s",
+    #     args.local_rank, device, args.n_gpu, bool(args.local_rank != -1), args.fp16,
+    # )
 
     if args.seed:
         set_seed(args)
 
-    config = GPT2Config.from_pretrained(args.config_name, cache_dir=args.cache_dir)
-    tokenizer = GPT2Tokenizer.from_pretrained(args.tokenizer_name, cache_dir=args.cache_dir)
-    model = GPT2LMHeadModel.from_pretrained(
-        args.model_name_or_path,
-        from_tf=False,
-        config=config,
-        cache_dir=args.cache_dir,
-    )
+    config = GPT2Config.from_pretrained(args.config_name)
+    tokenizer = GPT2Tokenizer.from_pretrained(args.tokenizer_name)
+    if args.model_name_or_path:
+        logger.info(f'Loading pretrained from {args.model_name_or_path}...')
+        model = GPT2LMHeadModel.from_pretrained(
+            args.model_name_or_path,
+            from_tf=False,
+            config=config,
+        )
+    else:
+        model = GPT2LMHeadModel(config)
+        logger.info(f'Loading model state dict from {args.state_dict}...')
+        state = torch.load(args.state_dict)
+        model.load_state_dict(state)
+
+    logging.info(f'Tokenizer size: {len(tokenizer.encoder)}')
+    logging.info(f'Model config: {config.to_dict()}')
     model.to(args.device)
 
     logger.info("Training/evaluation parameters %s", args)
@@ -536,9 +546,9 @@ def main():
             results.update(result)
 
     if args.mode == 'interact':
-        chat_history_ids = torch.LongTensor([])
-        tokenizer = GPT2Tokenizer.from_pretrained(args.output_dir)
-        model = GPT2LMHeadModel.from_pretrained(args.output_dir)
+        chat_history_ids = torch.LongTensor([]).to(device)
+        # tokenizer = GPT2Tokenizer.from_pretrained(args.output_dir)
+        # model = GPT2LMHeadModel.from_pretrained(args.output_dir)
 
         # Let's chat for 5 lines
         for step in range(5):
@@ -547,8 +557,7 @@ def main():
             # print(new_user_input_ids)
 
             # append the new user input tokens to the chat history
-            bot_input_ids = torch.cat([chat_history_ids, new_user_input_ids],
-                                      dim=-1) if step > 0 else new_user_input_ids
+            bot_input_ids = torch.cat([chat_history_ids, new_user_input_ids.to(device)], dim=-1)
 
             # generated a response while limiting the total chat history to 1000 tokens,
             chat_history_ids = model.generate(
