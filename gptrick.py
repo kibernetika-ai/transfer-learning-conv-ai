@@ -47,8 +47,7 @@ def parse_args():
     parser.add_argument('--cache_dir', default='cached')
     parser.add_argument('--dataset', required=True)
     parser.add_argument('--block_size', default=512)
-    parser.add_argument('--do_train', default=True)
-    parser.add_argument('--do_eval', default=False)
+    parser.add_argument('--mode', default='train')
     parser.add_argument('--evaluate_during_training', default=False)
     parser.add_argument('--per_gpu_train_batch_size', default=1)
     parser.add_argument('--per_gpu_eval_batch_size', default=1)
@@ -444,7 +443,7 @@ def main():
     if (
             os.path.exists(args.output_dir)
             and os.listdir(args.output_dir)
-            and args.do_train
+            and mode == 'train'
             and not args.overwrite_output_dir
             and not args.should_continue
     ):
@@ -485,7 +484,7 @@ def main():
     logger.info("Training/evaluation parameters %s", args)
 
     # Training
-    if args.do_train:
+    if args.mode == 'train':
         train_dataset = load_and_cache_examples(args, tokenizer, df_trn, df_val, evaluate=False)
         eval_dataset = load_and_cache_examples(args, tokenizer, df_trn, df_val, evaluate=True)
         global_step, tr_loss = train(args, train_dataset, eval_dataset, model, tokenizer)
@@ -493,7 +492,7 @@ def main():
 
     # Saving best-practices: if you use save_pretrained for the model and tokenizer, you can reload them using
     # from_pretrained()
-    if args.do_train:
+    if args.mode == 'train':
         # Create output directory if needed
         os.makedirs(args.output_dir, exist_ok=True)
 
@@ -516,7 +515,7 @@ def main():
 
     # Evaluation
     results = {}
-    if args.do_eval and args.local_rank in [-1, 0]:
+    if args.mode == 'eval' and args.local_rank in [-1, 0]:
         checkpoints = [args.output_dir]
         if args.eval_all_checkpoints:
             checkpoints = list(
