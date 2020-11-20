@@ -59,15 +59,15 @@ def parse_args():
     parser.add_argument('--num_train_epochs', default=2)
     parser.add_argument('--max_steps', default=-1)
     parser.add_argument('--warmup_steps', default=0)
-    parser.add_argument('--logging_steps', default=1000)
-    parser.add_argument('--save_steps', default=3500)
+    parser.add_argument('--logging_steps', default=200)
+    parser.add_argument('--save_steps', default=1000)
     parser.add_argument('--save_total_limit', default=None)
     parser.add_argument('--eval_all_checkpoints', default=False)
     parser.add_argument('--no_cuda', default=False)
     parser.add_argument('--overwrite_output_dir', default=True)
     parser.add_argument('--overwrite_cache', default=True)
     parser.add_argument('--should_continue', default=True)
-    parser.add_argument('--seed', default=42)
+    parser.add_argument('--seed', default=0)
     parser.add_argument('--local_rank', default=-1)
     parser.add_argument('--fp16', default=False)
     parser.add_argument('--fp16_opt_level', default='O1')
@@ -166,7 +166,7 @@ def _rotate_checkpoints(args, checkpoint_prefix="checkpoint", use_mtime=False) -
 def train(args, train_dataset, eval_dataset, model: PreTrainedModel, tokenizer: PreTrainedTokenizer) -> Tuple[int, float]:
     """ Train the model """
     if args.local_rank in [-1, 0]:
-        tb_writer = SummaryWriter()
+        tb_writer = SummaryWriter(args.output_dir)
 
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
 
@@ -268,11 +268,12 @@ def train(args, train_dataset, eval_dataset, model: PreTrainedModel, tokenizer: 
 
     model.zero_grad()
     train_iterator = trange(
-        epochs_trained, int(args.num_train_epochs), desc="Epoch", disable=args.local_rank not in [-1, 0]
+        epochs_trained, int(args.num_train_epochs), desc="Epoch", disable=None
     )
-    set_seed(args)  # Added here for reproducibility
+    if args.seed:
+        set_seed(args)  # Added here for reproducibility
     for _ in train_iterator:
-        epoch_iterator = tqdm(train_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])
+        epoch_iterator = tqdm(train_dataloader, desc="Iteration", disable=None)
         for step, batch in enumerate(epoch_iterator):
 
             # Skip past any already trained steps if resuming training
@@ -281,7 +282,8 @@ def train(args, train_dataset, eval_dataset, model: PreTrainedModel, tokenizer: 
                 continue
 
             inputs, labels = (batch, batch)
-            if inputs.shape[1] > 1024: continue
+            if inputs.shape[1] > 1024:
+                continue
             inputs = inputs.to(args.device)
             labels = labels.to(args.device)
             model.train()
@@ -312,14 +314,13 @@ def train(args, train_dataset, eval_dataset, model: PreTrainedModel, tokenizer: 
 
                 if args.local_rank in [-1, 0] and args.logging_steps > 0 and global_step % args.logging_steps == 0:
                     # Log metrics
-                    if (
-                            args.local_rank == -1 and args.evaluate_during_training
-                    ):  # Only evaluate when single GPU otherwise metrics may not average well
+                    if args.local_rank == -1 and args.evaluate_during_training:
                         results = evaluate(args, model, tokenizer, eval_dataset)
                         for key, value in results.items():
                             tb_writer.add_scalar("eval_{}".format(key), value, global_step)
                     tb_writer.add_scalar("lr", scheduler.get_lr()[0], global_step)
                     tb_writer.add_scalar("loss", (tr_loss - logging_loss) / args.logging_steps, global_step)
+                    logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
                     logging_loss = tr_loss
 
                 if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
@@ -443,7 +444,7 @@ def main():
     if (
             os.path.exists(args.output_dir)
             and os.listdir(args.output_dir)
-            and mode == 'train'
+            and args.mode == 'train'
             and not args.overwrite_output_dir
             and not args.should_continue
     ):
@@ -469,7 +470,8 @@ def main():
         args.local_rank, device, args.n_gpu, bool(args.local_rank != -1), args.fp16,
     )
 
-    set_seed(args)
+    if args.seed:
+        set_seed(args)
 
     config = GPT2Config.from_pretrained(args.config_name, cache_dir=args.cache_dir)
     tokenizer = GPT2Tokenizer.from_pretrained(args.tokenizer_name, cache_dir=args.cache_dir)
