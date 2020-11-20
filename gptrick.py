@@ -20,9 +20,9 @@ from transformers import (
     MODEL_WITH_LM_HEAD_MAPPING,
     WEIGHTS_NAME,
     AdamW,
-    AutoConfig,
-    AutoModelWithLMHead,
-    AutoTokenizer,
+    GPT2Config,
+    GPT2LMHeadModel,
+    GPT2Tokenizer,
     PreTrainedModel,
     PreTrainedTokenizer,
     get_linear_schedule_with_warmup,
@@ -161,7 +161,7 @@ def _rotate_checkpoints(args, checkpoint_prefix="checkpoint", use_mtime=False) -
         shutil.rmtree(checkpoint)
 
 
-def train(args, train_dataset, model: PreTrainedModel, tokenizer: PreTrainedTokenizer) -> Tuple[int, float]:
+def train(args, train_dataset, eval_dataset, model: PreTrainedModel, tokenizer: PreTrainedTokenizer) -> Tuple[int, float]:
     """ Train the model """
     if args.local_rank in [-1, 0]:
         tb_writer = SummaryWriter()
@@ -313,7 +313,7 @@ def train(args, train_dataset, model: PreTrainedModel, tokenizer: PreTrainedToke
                     if (
                             args.local_rank == -1 and args.evaluate_during_training
                     ):  # Only evaluate when single GPU otherwise metrics may not average well
-                        results = evaluate(args, model, tokenizer)
+                        results = evaluate(args, model, tokenizer, eval_dataset)
                         for key, value in results.items():
                             tb_writer.add_scalar("eval_{}".format(key), value, global_step)
                     tb_writer.add_scalar("lr", scheduler.get_lr()[0], global_step)
@@ -353,11 +353,10 @@ def train(args, train_dataset, model: PreTrainedModel, tokenizer: PreTrainedToke
     return global_step, tr_loss / global_step
 
 
-def evaluate(args, model: PreTrainedModel, tokenizer: PreTrainedTokenizer, df_trn, df_val, prefix="") -> Dict:
+def evaluate(args, model: PreTrainedModel, tokenizer: PreTrainedTokenizer, eval_dataset, prefix="") -> Dict:
     # Loop to handle MNLI double evaluation (matched, mis-matched)
     eval_output_dir = args.output_dir
 
-    eval_dataset = load_and_cache_examples(args, tokenizer, df_trn, df_val, evaluate=True)
     os.makedirs(eval_output_dir, exist_ok=True)
     args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
 
@@ -414,15 +413,13 @@ def evaluate(args, model: PreTrainedModel, tokenizer: PreTrainedTokenizer, df_tr
 def main():
     args = Args()
 
-    # Let's look at original dataset
     all_rick = pd.read_csv(args.dataset)
-
     contexted = []
     n = 7
 
     for i in range(n, len(all_rick['line'])):
         row = []
-        prev = i - 1 - n  # we additionally substract 1, so row will contain current responce and 7 previous responces
+        prev = i - 1 - n
         for j in range(i, prev, -1):
             row.append(all_rick['line'][j])
         contexted.append(row)
@@ -431,7 +428,6 @@ def main():
     columns = columns + ['context/' + str(i) for i in range(n - 1)]
 
     df = pd.DataFrame.from_records(contexted, columns=columns)
-
     df_trn, df_val = train_test_split(df, test_size=0.1)
 
     if args.should_continue:
@@ -465,21 +461,16 @@ def main():
         datefmt="%m/%d/%Y %H:%M:%S",
         level=logging.INFO if args.local_rank in [-1, 0] else logging.WARN,
     )
-    logger.warning(
+    logger.info(
         "Process rank: %s, device: %s, n_gpu: %s, distributed training: %s, 16-bits training: %s",
-        args.local_rank,
-        device,
-        args.n_gpu,
-        bool(args.local_rank != -1),
-        args.fp16,
+        args.local_rank, device, args.n_gpu, bool(args.local_rank != -1), args.fp16,
     )
 
-    # Set seed
     set_seed(args)
 
-    config = AutoConfig.from_pretrained(args.config_name, cache_dir=args.cache_dir)
-    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name, cache_dir=args.cache_dir)
-    model = AutoModelWithLMHead.from_pretrained(
+    config = GPT2Config.from_pretrained(args.config_name, cache_dir=args.cache_dir)
+    tokenizer = GPT2Tokenizer.from_pretrained(args.tokenizer_name, cache_dir=args.cache_dir)
+    model = GPT2LMHeadModel.from_pretrained(
         args.model_name_or_path,
         from_tf=False,
         config=config,
@@ -492,7 +483,8 @@ def main():
     # Training
     if args.do_train:
         train_dataset = load_and_cache_examples(args, tokenizer, df_trn, df_val, evaluate=False)
-        global_step, tr_loss = train(args, train_dataset, model, tokenizer)
+        eval_dataset = load_and_cache_examples(args, tokenizer, df_trn, df_val, evaluate=True)
+        global_step, tr_loss = train(args, train_dataset, eval_dataset, model, tokenizer)
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
     # Saving best-practices: if you use save_pretrained for the model and tokenizer, you can reload them using
@@ -514,8 +506,8 @@ def main():
         torch.save(args, os.path.join(args.output_dir, "training_args.bin"))
 
         # Load a trained model and vocabulary that you have fine-tuned
-        model = AutoModelWithLMHead.from_pretrained(args.output_dir)
-        tokenizer = AutoTokenizer.from_pretrained(args.output_dir)
+        model = GPT2LMHeadModel.from_pretrained(args.output_dir)
+        tokenizer = GPT2Tokenizer.from_pretrained(args.output_dir)
         model.to(args.device)
 
     # Evaluation
@@ -532,7 +524,7 @@ def main():
             global_step = checkpoint.split("-")[-1] if len(checkpoints) > 1 else ""
             prefix = checkpoint.split("/")[-1] if checkpoint.find("checkpoint") != -1 else ""
 
-            model = AutoModelWithLMHead.from_pretrained(checkpoint)
+            model = GPT2LMHeadModel.from_pretrained(checkpoint)
             model.to(args.device)
             result = evaluate(args, model, tokenizer, df_trn, df_val, prefix=prefix)
             result = dict((k + "_{}".format(global_step), v) for k, v in result.items())
@@ -540,8 +532,8 @@ def main():
 
     if args.mode == 'interact':
         chat_history_ids = torch.LongTensor([])
-        tokenizer = AutoTokenizer.from_pretrained(args.output_dir)
-        model = AutoModelWithLMHead.from_pretrained(args.output_dir)
+        tokenizer = GPT2Tokenizer.from_pretrained(args.output_dir)
+        model = GPT2LMHeadModel.from_pretrained(args.output_dir)
 
         # Let's chat for 5 lines
         for step in range(5):
