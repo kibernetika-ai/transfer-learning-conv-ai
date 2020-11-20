@@ -67,7 +67,7 @@ def parse_args():
     parser.add_argument('--no_cuda', default=False)
     parser.add_argument('--overwrite_output_dir', default=True)
     parser.add_argument('--overwrite_cache', default=True)
-    parser.add_argument('--should_continue', default=False)
+    parser.add_argument('--should_continue', default=True)
     parser.add_argument('--seed', default=42)
     parser.add_argument('--local_rank', default=-1)
     parser.add_argument('--fp16', default=False)
@@ -436,8 +436,9 @@ def main():
     if args.should_continue:
         sorted_checkpoints = _sorted_checkpoints(args)
         if len(sorted_checkpoints) == 0:
-            raise ValueError("Used --should_continue but no checkpoint was found in --output_dir.")
+            logger.warning("Used --should_continue but no checkpoint was found in --output_dir.")
         else:
+            logger.info(f"Found existing checkpoint: {sorted_checkpoints[-1]}")
             args.model_name_or_path = sorted_checkpoints[-1]
 
     if (
