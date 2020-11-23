@@ -552,7 +552,7 @@ def main():
         duration = 15  # seconds
         speech_api = speech.SpeechRecognizer(
             speech_client_creds=args.speech_creds,
-            max_silence_ms=2000,
+            max_silence_ms=1000,
             verbose=False,
         )
 
@@ -561,8 +561,8 @@ def main():
         # tokenizer = GPT2Tokenizer.from_pretrained(args.output_dir)
         # model = GPT2LMHeadModel.from_pretrained(args.output_dir)
 
-        # Let's chat for 5 lines
-        for step in range(5):
+        # Let's chat for 20 lines
+        for step in range(20):
             # encode the new user input, add the eos_token and return a tensor in Pytorch
             if not args.speech_creds:
                 user_input = input(">> User: ")
@@ -576,6 +576,11 @@ def main():
                     if user_input is not None:
                         break
                 print(user_input)
+            if user_input == 'end':
+                break
+            if user_input == 'again':
+                chat_history_ids = torch.LongTensor([]).to(device)
+                continue
             new_user_input_ids = tokenizer.encode(user_input + tokenizer.eos_token, return_tensors='pt')
 
             # append the new user input tokens to the chat history
