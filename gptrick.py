@@ -6,6 +6,7 @@ import pickle
 import random
 import re
 import shutil
+import sys
 from typing import Dict, List, Tuple
 
 import numpy as np
@@ -69,6 +70,7 @@ def parse_args():
     parser.add_argument('--overwrite_cache', default=True)
     parser.add_argument('--should_continue', default=True)
     parser.add_argument('--seed', default=0)
+    parser.add_argument('--speech_creds', help='Speech credentials json file for GCE.')
     parser.add_argument('--local_rank', default=-1)
     parser.add_argument('--fp16', default=False)
     parser.add_argument('--fp16_opt_level', default='O1')
@@ -487,7 +489,7 @@ def main():
         model = GPT2LMHeadModel(config)
         logger.info(f'Loading model state dict from {args.state_dict}...')
         state = torch.load(args.state_dict)
-        model.load_state_dict(state)
+        model.load_state_dict(state, strict=False)
 
     logging.info(f'Tokenizer size: {len(tokenizer.encoder)}')
     logging.info(f'Model config: {config.to_dict()}')
@@ -545,6 +547,15 @@ def main():
             result = dict((k + "_{}".format(global_step), v) for k, v in result.items())
             results.update(result)
 
+    if args.speech_creds:
+        import speech
+        duration = 15  # seconds
+        speech_api = speech.SpeechRecognizer(
+            speech_client_creds=args.speech_creds,
+            max_silence_ms=2000,
+            verbose=False,
+        )
+
     if args.mode == 'interact':
         chat_history_ids = torch.LongTensor([]).to(device)
         # tokenizer = GPT2Tokenizer.from_pretrained(args.output_dir)
@@ -553,8 +564,19 @@ def main():
         # Let's chat for 5 lines
         for step in range(5):
             # encode the new user input, add the eos_token and return a tensor in Pytorch
-            new_user_input_ids = tokenizer.encode(input(">> User: ") + tokenizer.eos_token, return_tensors='pt')
-            # print(new_user_input_ids)
+            if not args.speech_creds:
+                user_input = input(">> User: ")
+            else:
+                print('>> User (voice): ', end='')
+                sys.stdout.flush()
+
+                while True:
+                    # Record until we get something
+                    user_input = speech_api.record_and_recognize(duration, verbose=False)
+                    if user_input is not None:
+                        break
+                print(user_input)
+            new_user_input_ids = tokenizer.encode(user_input + tokenizer.eos_token, return_tensors='pt')
 
             # append the new user input tokens to the chat history
             bot_input_ids = torch.cat([chat_history_ids, new_user_input_ids.to(device)], dim=-1)
