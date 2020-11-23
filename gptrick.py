@@ -41,7 +41,7 @@ def parse_args():
 
     parser.add_argument('--output_dir', default='output-small')
     parser.add_argument('--model_type', default='gpt2')
-    parser.add_argument('--model_name_or_path', default='microsoft/pytorch_model.bin')
+    parser.add_argument('--model_name_or_path')
     parser.add_argument('--config_name', default='microsoft/config.json')
     parser.add_argument('--tokenizer_name', default='microsoft/')
     parser.add_argument('--cache_dir', default='cached')
