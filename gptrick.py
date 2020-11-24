@@ -62,6 +62,7 @@ def parse_args():
     parser.add_argument('--max_grad_norm', default=1.0)
     parser.add_argument('--num_train_epochs', default=2)
     parser.add_argument('--max_steps', default=-1)
+    parser.add_argument('--max_history', type=int, default=5)
     parser.add_argument('--warmup_steps', default=0)
     parser.add_argument('--logging_steps', default=200)
     parser.add_argument('--save_steps', default=1000)
@@ -552,6 +553,17 @@ def main():
             result = dict((k + "_{}".format(global_step), v) for k, v in result.items())
             results.update(result)
 
+        print(results)
+
+
+
+    if args.mode == 'interact':
+        interact(args, model, tokenizer)
+
+
+def interact(args, model, tokenizer):
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
     if args.speech_creds:
         import speech
         duration = 15  # seconds
@@ -565,71 +577,77 @@ def main():
         from ranking import model as ranking
         ranker = ranking.get_model(args.ranker, tokenizer.eos_token, cuda=torch.cuda.is_available())
 
-    if args.mode == 'interact':
-        chat_history_ids = torch.LongTensor([]).to(device)
-        # tokenizer = GPT2Tokenizer.from_pretrained(args.output_dir)
-        # model = GPT2LMHeadModel.from_pretrained(args.output_dir)
+    # chat_history_ids = torch.LongTensor([]).to(device)
 
-        # Let's chat for 20 lines
-        for step in range(20):
-            # encode the new user input, add the eos_token and return a tensor in Pytorch
-            if not args.speech_creds:
-                user_input = input(">> User: ")
-            else:
-                print('>> User (voice): ', end='')
-                sys.stdout.flush()
+    # Let's chat for 20 lines
+    history = []
+    for step in range(20):
+        # encode the new user input, add the eos_token and return a tensor in Pytorch
+        if not args.speech_creds:
+            user_input = input(">> User: ")
+        else:
+            print('>> User (voice): ', end='')
+            sys.stdout.flush()
 
-                while True:
-                    # Record until we get something
-                    user_input = speech_api.record_and_recognize(duration, verbose=False)
-                    if user_input is not None:
-                        break
-                print(user_input)
-            if user_input == 'end':
-                break
-            if user_input == 'again':
-                chat_history_ids = torch.LongTensor([]).to(device)
-                continue
-            new_user_input_ids = tokenizer.encode(user_input + tokenizer.eos_token, return_tensors='pt')
+            while True:
+                # Record until we get something
+                user_input = speech_api.record_and_recognize(duration, verbose=False)
+                if user_input is not None:
+                    break
+            print(user_input)
+        if user_input == 'end':
+            break
+        if user_input == 'again':
+            history = []
+            continue
 
-            # append the new user input tokens to the chat history
-            bot_input_ids = torch.cat([chat_history_ids, new_user_input_ids.to(device)], dim=-1)
+        # append the new user input tokens to the chat history
+        history.append(user_input)
+        bot_input_ids = tokenizer.encode(
+            tokenizer.eos_token.join(history) + tokenizer.eos_token, return_tensors='pt'
+        ).to(device)
+        # new_user_input_ids = tokenizer.encode(user_input + tokenizer.eos_token, return_tensors='pt')
+        # bot_input_ids = torch.cat([chat_history_ids, new_user_input_ids.to(device)], dim=-1)
 
-            # generated a response while limiting the total chat history to 1000 tokens,
-            n = 10
-            gen_kwargs = dict(
-                max_length=200,
-                pad_token_id=tokenizer.eos_token_id,
-                no_repeat_ngram_size=3,
-                do_sample=True,
-                top_k=100,
-                top_p=0.7,
-                temperature=0.8
-            )
-            if args.ranker:
-                to_rank = model.generate(bot_input_ids.repeat(n, 1), **gen_kwargs)
-                to_rank_hyps = [tokenizer.decode(t) for t in to_rank]
-                input_str = tokenizer.decode(bot_input_ids[0])
-                scores = ranker.predict(input_str, to_rank_hyps)
-                sorted_scores = sorted(zip(scores, to_rank_hyps), reverse=True)
-                if args.verbose:
-                    for score, hyp in sorted_scores:
-                        out = hyp[len(input_str):hyp.find(tokenizer.eos_token, len(input_str))]
-                        print(f'{score:.3f} - {out}')
-                sys.stdout.flush()
-                # Choose from 3 best answers
-                answer_id = torch.multinomial(torch.tensor([s[0] for s in sorted_scores[:3]]), num_samples=1)
-                answer = sorted_scores[answer_id.item()][1]
-                chat_history_ids = tokenizer.encode(answer, return_tensors='pt').to(device)
-            else:
-                chat_history_ids = model.generate(bot_input_ids, **gen_kwargs)
+        # generated a response while limiting the total chat history to 1000 tokens,
+        n = 10
+        gen_kwargs = dict(
+            max_length=200,
+            pad_token_id=tokenizer.eos_token_id,
+            no_repeat_ngram_size=3,
+            do_sample=True,
+            top_k=100,
+            top_p=0.7,
+            temperature=0.8
+        )
+        print(f'input: {tokenizer.decode(bot_input_ids[0])}')
+        if args.ranker:
+            to_rank = model.generate(bot_input_ids.repeat(n, 1), **gen_kwargs)
+            to_rank_hyps = [tokenizer.decode(t) for t in to_rank]
+            input_str = tokenizer.decode(bot_input_ids[0])
+            scores = ranker.predict(input_str, to_rank_hyps)
+            sorted_scores = sorted(zip(scores, to_rank_hyps), reverse=True)
+            if args.verbose:
+                for score, hyp in sorted_scores:
+                    out = hyp[len(input_str):hyp.find(tokenizer.eos_token, len(input_str))]
+                    print(f'{score:.3f} - {out}')
+            sys.stdout.flush()
+            # Choose from 3 best answers
+            answer_id = torch.multinomial(torch.tensor([s[0] for s in sorted_scores[:3]]), num_samples=1)
+            answer = sorted_scores[answer_id.item()][1]
+            output_ids = tokenizer.encode(answer, return_tensors='pt').to(device)
+            # chat_history_ids = tokenizer.encode(answer, return_tensors='pt').to(device)
+        else:
+            # chat_history_ids = model.generate(bot_input_ids, **gen_kwargs)
+            output_ids = model.generate(bot_input_ids, **gen_kwargs)
 
-            # pretty print last output tokens from bot
-            print("Bot: {}".format(
-                tokenizer.decode(chat_history_ids[:, bot_input_ids.shape[-1]:][0], skip_special_tokens=True))
-            )
+        print(f'output: {tokenizer.decode(output_ids[0])}')
+        # pretty print last output tokens from bot
+        answer = tokenizer.decode(output_ids[:, bot_input_ids.shape[-1]:][0], skip_special_tokens=True)
+        print(f'Bot: {answer}')
 
-    return results
+        history.append(answer)
+        history = history[-args.max_history:]
 
 
 if __name__ == '__main__':

@@ -3,7 +3,6 @@ import os
 import yaml
 
 import torch
-import numpy as np
 from transformers import GPT2Tokenizer, GPT2Model, GPT2Config
 
 
@@ -25,25 +24,6 @@ def get_model(path, eos_token, cuda=True):
     else:
         raise RuntimeError(f'Error path: {path}')
     return model
-
-
-def predict(model, cxt, hyps, max_cxt_turn=None):
-    # split into smaller batch to avoid OOM
-    n = len(hyps)
-    i0 = 0
-    scores = []
-    while i0 < n:
-        i1 = min(i0 + 32, n)
-        _scores = model.predict(cxt, hyps[i0: i1], max_cxt_turn=max_cxt_turn)
-        scores.append(_scores)
-        i0 = i1
-    if isinstance(_scores, dict):
-        d_scores = dict()
-        for k in _scores:
-            d_scores[k] = np.concatenate([_scores[k] for _scores in scores])
-        return d_scores
-    else:
-        return np.concatenate(scores)
 
 
 class ScorerBase(torch.nn.Module):
@@ -135,26 +115,25 @@ class Scorer(ScorerBase):
 
 
 class JointScorer(ScorerBase):
-
     def core(self, ids, l_ids, return_logits=False):
         assert (not return_logits)
         scores = dict()
-        for k in self.kk['prior'] + self.kk['cond']:
-            scorer = getattr(self, 'scorer_%s' % k)
-            scores[k] = scorer.core(ids, l_ids)
+        for name in self.model_groups['prior'] + self.model_groups['cond']:
+            scorer = getattr(self, 'scorer_%s' % name)
+            scores[name] = scorer.core(ids, l_ids)
 
-        def avg_score(kk):
-            if not kk:
+        def avg_score(names):
+            if not names:
                 return 1
             sum_score_wt = 0
             sum_wt = 0
-            for k in kk:
-                sum_score_wt = sum_score_wt + scores[k] * self.wt[k]
-                sum_wt += self.wt[k]
+            for name in names:
+                sum_score_wt = sum_score_wt + scores[name] * self.weight[name]
+                sum_wt += self.weight[name]
             return sum_score_wt / sum_wt
 
-        prior = avg_score(self.kk['prior'])
-        cond = avg_score(self.kk['cond'])
+        prior = avg_score(self.model_groups['prior'])
+        cond = avg_score(self.model_groups['cond'])
         scores['final'] = prior * cond
         return scores
 
@@ -164,21 +143,21 @@ class JointScorer(ScorerBase):
         # print(config)
 
         paths = dict()
-        self.wt = dict()
-        self.kk = dict()
+        self.weight = dict()
+        self.model_groups = dict()
         for prefix in ['prior', 'cond']:
-            self.kk[prefix] = []
-            for d in config[prefix]:
-                k = d['name']
-                self.kk[prefix].append(k)
-                self.wt[k] = d['wt']
-                paths[k] = d['path']
+            self.model_groups[prefix] = []
+            for model_params in config[prefix]:
+                name = model_params['name']
+                self.model_groups[prefix].append(name)
+                self.weight[name] = model_params['weight']
+                model_path = os.path.join(model_dir, f'{name}.pth')
+                # if exist, load it.
+                if os.path.isfile(model_path):
+                    paths[name] = model_path
 
-        for k in paths:
-            path = paths[k]
-            # print('setting up model `%s`' % k)
-            scorer = Scorer(OptionInfer(cuda=self.opt.cuda), eos_token=self.eos_token)
-            scorer.load(path)
-            if self.opt.cuda:
-                scorer.cuda()
-            setattr(self, 'scorer_%s' % k, scorer)
+                    scorer = Scorer(OptionInfer(cuda=self.opt.cuda), eos_token=self.eos_token)
+                    scorer.load(model_path)
+                    if self.opt.cuda:
+                        scorer.cuda()
+                    setattr(self, 'scorer_%s' % name, scorer)
