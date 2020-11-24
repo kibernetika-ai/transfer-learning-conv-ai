@@ -620,7 +620,7 @@ def interact(args, model, tokenizer):
             top_p=0.7,
             temperature=0.8
         )
-        print(f'input: {tokenizer.decode(bot_input_ids[0])}')
+        # print(f'input: {tokenizer.decode(bot_input_ids[0])}')
         if args.ranker:
             to_rank = model.generate(bot_input_ids.repeat(n, 1), **gen_kwargs)
             to_rank_hyps = [tokenizer.decode(t) for t in to_rank]
@@ -641,7 +641,7 @@ def interact(args, model, tokenizer):
             # chat_history_ids = model.generate(bot_input_ids, **gen_kwargs)
             output_ids = model.generate(bot_input_ids, **gen_kwargs)
 
-        print(f'output: {tokenizer.decode(output_ids[0])}')
+        # print(f'output: {tokenizer.decode(output_ids[0])}')
         # pretty print last output tokens from bot
         answer = tokenizer.decode(output_ids[:, bot_input_ids.shape[-1]:][0], skip_special_tokens=True)
         print(f'Bot: {answer}')

@@ -106,12 +106,14 @@ class Scorer(ScorerBase):
 
     def load(self, path):
         # print('loading from ' + path)
-        weights = torch.load(path)
+        weights = torch.load(path, map_location=torch.device('cpu'))
         if path.endswith('.pkl'):
             # DialoGPT checkpoint
             weights['score.weight'] = weights['lm_head.decoder.weight'][self.ix_EOS: self.ix_EOS + 1, :]
             del weights['lm_head.decoder.weight']
         self.load_state_dict(weights, strict=False)
+        if self.opt.cuda:
+            self.cuda()
 
 
 class JointScorer(ScorerBase):
@@ -119,8 +121,9 @@ class JointScorer(ScorerBase):
         assert (not return_logits)
         scores = dict()
         for name in self.model_groups['prior'] + self.model_groups['cond']:
-            scorer = getattr(self, 'scorer_%s' % name)
-            scores[name] = scorer.core(ids, l_ids)
+            if hasattr(self, f'scorer_{name}'):
+                scorer = getattr(self, f'scorer_{name}')
+                scores[name] = scorer.core(ids, l_ids)
 
         def avg_score(names):
             if not names:
@@ -134,8 +137,8 @@ class JointScorer(ScorerBase):
 
         prior = avg_score(self.model_groups['prior'])
         cond = avg_score(self.model_groups['cond'])
-        scores['final'] = prior * cond
-        return scores
+        # scores['final'] = prior * cond
+        return prior * cond
 
     def load(self, model_dir):
         with open(os.path.join(model_dir, 'ensemble.yml'), 'r') as stream:
@@ -149,15 +152,15 @@ class JointScorer(ScorerBase):
             self.model_groups[prefix] = []
             for model_params in config[prefix]:
                 name = model_params['name']
-                self.model_groups[prefix].append(name)
-                self.weight[name] = model_params['weight']
                 model_path = os.path.join(model_dir, f'{name}.pth')
                 # if exist, load it.
                 if os.path.isfile(model_path):
+                    self.model_groups[prefix].append(name)
+                    self.weight[name] = model_params['weight']
                     paths[name] = model_path
 
                     scorer = Scorer(OptionInfer(cuda=self.opt.cuda), eos_token=self.eos_token)
                     scorer.load(model_path)
                     if self.opt.cuda:
                         scorer.cuda()
-                    setattr(self, 'scorer_%s' % name, scorer)
+                    setattr(self, f'scorer_{name}', scorer)
