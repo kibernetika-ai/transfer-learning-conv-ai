@@ -47,10 +47,12 @@ def parse_args():
     parser.add_argument('--tokenizer_name', default='microsoft/')
     parser.add_argument('--cache_dir', default='cached')
     parser.add_argument('--state_dict')
+    parser.add_argument('--ranker')
     parser.add_argument('--dataset', required=True)
     parser.add_argument('--block_size', default=512)
     parser.add_argument('--mode', default='train')
     parser.add_argument('--evaluate_during_training', default=False)
+    parser.add_argument('--verbose', action='store_true', default=False)
     parser.add_argument('--per_gpu_train_batch_size', default=1)
     parser.add_argument('--per_gpu_eval_batch_size', default=1)
     parser.add_argument('--gradient_accumulation_steps', default=1)
@@ -488,14 +490,17 @@ def main():
     else:
         model = GPT2LMHeadModel(config)
         logger.info(f'Loading model state dict from {args.state_dict}...')
-        state = torch.load(args.state_dict)
+        state = torch.load(args.state_dict, map_location=torch.device('cpu'))
         model.load_state_dict(state, strict=False)
 
-    logging.info(f'Tokenizer size: {len(tokenizer.encoder)}')
-    logging.info(f'Model config: {config.to_dict()}')
     model.to(args.device)
 
-    logger.info("Training/evaluation parameters %s", args)
+    if args.mode == 'train':
+        logging.info(f'Tokenizer size: {len(tokenizer.encoder)}')
+        logging.info(f'Model config: {config.to_dict()}')
+
+    if args.mode == 'train':
+        logger.info("Training/evaluation parameters %s", args)
 
     # Training
     if args.mode == 'train':
@@ -556,6 +561,10 @@ def main():
             verbose=False,
         )
 
+    if args.ranker:
+        from ranking import model as ranking
+        ranker = ranking.get_model(args.ranker, tokenizer.eos_token, cuda=torch.cuda.is_available())
+
     if args.mode == 'interact':
         chat_history_ids = torch.LongTensor([]).to(device)
         # tokenizer = GPT2Tokenizer.from_pretrained(args.output_dir)
@@ -587,8 +596,9 @@ def main():
             bot_input_ids = torch.cat([chat_history_ids, new_user_input_ids.to(device)], dim=-1)
 
             # generated a response while limiting the total chat history to 1000 tokens,
-            chat_history_ids = model.generate(
-                bot_input_ids, max_length=200,
+            n = 10
+            gen_kwargs = dict(
+                max_length=200,
                 pad_token_id=tokenizer.eos_token_id,
                 no_repeat_ngram_size=3,
                 do_sample=True,
@@ -596,10 +606,28 @@ def main():
                 top_p=0.7,
                 temperature=0.8
             )
+            if args.ranker:
+                to_rank = model.generate(bot_input_ids.repeat(n, 1), **gen_kwargs)
+                to_rank_hyps = [tokenizer.decode(t) for t in to_rank]
+                input_str = tokenizer.decode(bot_input_ids[0])
+                scores = ranker.predict(input_str, to_rank_hyps)
+                sorted_scores = sorted(zip(scores, to_rank_hyps), reverse=True)
+                if args.verbose:
+                    for score, hyp in sorted_scores:
+                        out = hyp[len(input_str):hyp.find(tokenizer.eos_token, len(input_str))]
+                        print(f'{score:.3f} - {out}')
+                sys.stdout.flush()
+                # Choose from 3 best answers
+                answer_id = torch.multinomial(torch.tensor([s[0] for s in sorted_scores[:3]]), num_samples=1)
+                answer = sorted_scores[answer_id.item()][1]
+                chat_history_ids = tokenizer.encode(answer, return_tensors='pt').to(device)
+            else:
+                chat_history_ids = model.generate(bot_input_ids, **gen_kwargs)
 
-            # pretty print last ouput tokens from bot
+            # pretty print last output tokens from bot
             print("Bot: {}".format(
-                tokenizer.decode(chat_history_ids[:, bot_input_ids.shape[-1]:][0], skip_special_tokens=True)))
+                tokenizer.decode(chat_history_ids[:, bot_input_ids.shape[-1]:][0], skip_special_tokens=True))
+            )
 
     return results
 
