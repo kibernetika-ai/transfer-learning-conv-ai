@@ -43,12 +43,12 @@ def parse_args():
     parser.add_argument('--output_dir', default='output-small')
     parser.add_argument('--model_type', default='gpt2')
     parser.add_argument('--model_name_or_path')
-    parser.add_argument('--config_name', default='microsoft/config.json')
-    parser.add_argument('--tokenizer_name', default='microsoft/')
+    parser.add_argument('--config_name', required=True)
+    parser.add_argument('--tokenizer', required=True)
     parser.add_argument('--cache_dir', default='cached')
     parser.add_argument('--state_dict')
     parser.add_argument('--ranker')
-    parser.add_argument('--dataset', required=True)
+    parser.add_argument('--dataset')
     parser.add_argument('--block_size', default=512)
     parser.add_argument('--mode', default='train')
     parser.add_argument('--evaluate_during_training', default=False)
@@ -257,7 +257,7 @@ def train(args, train_dataset, eval_dataset, model: PreTrainedModel, tokenizer: 
     # Check if continuing training from a checkpoint
     if args.model_name_or_path and os.path.exists(args.model_name_or_path):
         try:
-            # set global_step to gobal_step of last saved checkpoint from model path
+            # set global_step to global_step of last saved checkpoint from model path
             checkpoint_suffix = args.model_name_or_path.split("-")[-1].split("/")[0]
             global_step = int(checkpoint_suffix)
             epochs_trained = global_step // (len(train_dataloader) // args.gradient_accumulation_steps)
@@ -419,10 +419,8 @@ def evaluate(args, model: PreTrainedModel, tokenizer: PreTrainedTokenizer, eval_
     return result
 
 
-def main():
-    args = parse_args()
-
-    all_rick = pd.read_csv(args.dataset)
+def preprocess_dataset(csv_path):
+    all_rick = pd.read_csv(csv_path)
     contexted = []
     n = 7
 
@@ -438,6 +436,11 @@ def main():
 
     df = pd.DataFrame.from_records(contexted, columns=columns)
     df_trn, df_val = train_test_split(df, test_size=0.1)
+    return df_trn, df_val
+
+
+def main():
+    args = parse_args()
 
     if args.should_continue and args.mode == 'train':
         sorted_checkpoints = _sorted_checkpoints(args)
@@ -480,7 +483,7 @@ def main():
         set_seed(args)
 
     config = GPT2Config.from_pretrained(args.config_name)
-    tokenizer = GPT2Tokenizer.from_pretrained(args.tokenizer_name)
+    tokenizer = GPT2Tokenizer.from_pretrained(args.tokenizer)
     if args.model_name_or_path:
         logger.info(f'Loading pretrained from {args.model_name_or_path}...')
         model = GPT2LMHeadModel.from_pretrained(
@@ -504,15 +507,14 @@ def main():
         logger.info("Training/evaluation parameters %s", args)
 
     # Training
+    # Saving best-practices: if you use save_pretrained for the model and tokenizer, you can reload them using
+    # from_pretrained()
     if args.mode == 'train':
+        df_trn, df_val = preprocess_dataset(args.dataset)
         train_dataset = load_and_cache_examples(args, tokenizer, df_trn, df_val, evaluate=False)
         eval_dataset = load_and_cache_examples(args, tokenizer, df_trn, df_val, evaluate=True)
         global_step, tr_loss = train(args, train_dataset, eval_dataset, model, tokenizer)
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
-
-    # Saving best-practices: if you use save_pretrained for the model and tokenizer, you can reload them using
-    # from_pretrained()
-    if args.mode == 'train':
         # Create output directory if needed
         os.makedirs(args.output_dir, exist_ok=True)
 
@@ -536,6 +538,7 @@ def main():
     # Evaluation
     results = {}
     if args.mode == 'eval' and args.local_rank in [-1, 0]:
+        df_trn, df_val = preprocess_dataset(args.dataset)
         checkpoints = [args.output_dir]
         if args.eval_all_checkpoints:
             checkpoints = list(
@@ -554,8 +557,6 @@ def main():
             results.update(result)
 
         print(results)
-
-
 
     if args.mode == 'interact':
         interact(args, model, tokenizer)
