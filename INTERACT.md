@@ -4,17 +4,21 @@
 
 As a base for this instruction, microsoft-dialoGPT is used.
 
-1. Download [config.json](https://storage.googleapis.com/kuberlab/gpt2/config.json), [vocab.json](https://storage.googleapis.com/kuberlab/gpt2/vocab.json) and [merges.txt](https://storage.googleapis.com/kuberlab/gpt2/merges.txt) files.
-2. Download model state dict file, currently there a couple of them available:
+1. Install dependencies:
+    ```
+    pip install -r requirements.txt
+    ```
+2. Download [config.json](https://storage.googleapis.com/kuberlab/gpt2/config.json), [vocab.json](https://storage.googleapis.com/kuberlab/gpt2/vocab.json) and [merges.txt](https://storage.googleapis.com/kuberlab/gpt2/merges.txt) files.
+3. Download model state dict file, currently there a couple of them available:
    * [rick_morty.bin](https://storage.googleapis.com/kuberlab/gpt2/rick_morty.bin) - trained on Rick and Morty series dialogs
    * [dialoGPT-medium](https://storage.googleapis.com/kuberlab/gpt2/dialoGPT-medium.bin) - microsoft DialoGPT-medium
    * You can search more models at [https://github.com/microsoft/DialoGPT](https://github.com/microsoft/DialoGPT), 
    but don't forget to download another config.json and vocab/merges files (if applicable).
-3. Save all these files into one directory and run:
+4. Save all these files into one directory and run:
 
-```bash
-python gpt_script.py --tokenizer <dir> --config_name <dir>/config.json --mode interact --state_dict <dir>/model_file.bin
-```
+    ```bash
+    python gpt_script.py --tokenizer <dir> --config_name <dir>/config.json --mode interact --state_dict <dir>/model_file.bin
+    ```
 
 ### Usage with ranker models
 
